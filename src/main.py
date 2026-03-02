@@ -1,69 +1,60 @@
 from __future__ import annotations
 
-import argparse
+import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import math
 import sys
 import os
+import io
 
 sys.path.insert(0, os.path.dirname(__file__))
 
 from solvers import ALL_SOLVERS
 from comparison import ALL_SCIPY_SOLVERS
-from problems import ALL_PROBLEMS
+from problems import IVP
 from utils import (
     absolute_error,
     relative_error_percent,
     format_table,
     format_float,
+    retrieve_all_IVP_problems_from_csv,
+    add_IVP_problem_to_csv,
+    remove_IVP_problem_from_csv,
 )
 
 
 DEFAULT_STEP_SIZES = [0.5, 0.25, 0.1]
-SCIPY_METHODS_TO_COMPARE = ["SciPy RK45", "SciPy DOP853", "SciPy Radau"]
+CSV_PATH = os.path.join(os.path.dirname(__file__), "IVP_problems.csv")
+
+problems_pool: list[IVP] = retrieve_all_IVP_problems_from_csv(CSV_PATH)
 
 
+# ── Benchmark logic (returns plain-text report) ────────────────────────
 def run_benchmark(
-    problems_indices: list[int] | None = None,
-    step_sizes: list[float] | None = None,
-    verbose: bool = True,
-) -> dict:
-    if step_sizes is None:
-        step_sizes = DEFAULT_STEP_SIZES
-    problems = (
-        [ALL_PROBLEMS[i] for i in problems_indices]
-        if problems_indices
-        else ALL_PROBLEMS
-    )
+    selected_problems: list[IVP],
+    step_sizes: list[float],
+) -> str:
     all_solvers = ALL_SOLVERS + ALL_SCIPY_SOLVERS
+    buf = io.StringIO()
 
-    results: dict = {}
-
-    for ivp in problems:
-        if verbose:
-            print(f"\n{'='*72}")
-            print(f"Problem: {ivp.name}")
-            print(f"  {ivp.description}")
-            print(f"  x ∈ [{ivp.x0}, {ivp.x_end}],  y({ivp.x0}) = {ivp.y0}")
-            if ivp.exact is not None:
-                print(f"  Exact at x_end: {format_float(ivp.exact(ivp.x_end))}")
-            print()
-
-        results[ivp.name] = {}
+    for ivp in selected_problems:
+        buf.write(f"\n{'=' * 72}\n")
+        buf.write(f"Problem: {ivp.name}\n")
+        buf.write(f"  {ivp.description}\n")
+        buf.write(f"  x in [{ivp.x0}, {ivp.x_end}],  y({ivp.x0}) = {ivp.y0}\n")
+        if ivp.exact is not None:
+            buf.write(f"  Exact at x_end: {format_float(ivp.exact(ivp.x_end))}\n")
+        buf.write("\n")
 
         for h in step_sizes:
-            results[ivp.name][h] = {}
-
             headers = ["Method", "y_final", "|error|", "rel err (%)"]
             rows = []
-
             exact_y = ivp.exact_at(ivp.x_end)
 
             for solver in all_solvers:
                 try:
-                    result = solver.solve(
-                        ivp.f, ivp.x0, ivp.y0, ivp.x_end, h
-                    )
+                    result = solver.solve(ivp.f, ivp.x0, ivp.y0, ivp.x_end, h)
                     y_final = result.final_value()
-                    results[ivp.name][h][solver.name] = result
 
                     if exact_y is not None:
                         abs_err = absolute_error(y_final, exact_y)
@@ -81,60 +72,299 @@ def run_benchmark(
                             "N/A",
                             "N/A",
                         ])
-
                 except Exception as exc:
-                    results[ivp.name][h][solver.name] = None
                     rows.append([solver.name, "ERROR", str(exc)[:40], ""])
 
-            if verbose:
-                print(f"  Step size h = {h}")
-                print(format_table(headers, rows, col_widths=[28, 14, 14, 12]))
-                print()
+            buf.write(f"  Step size h = {h}\n")
+            buf.write(format_table(headers, rows, col_widths=[28, 14, 14, 12]))
+            buf.write("\n\n")
 
-    return results
-
-
-def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--step", nargs="+", type=float, default=DEFAULT_STEP_SIZES,
-        metavar="H", help="Step size(s) to use (default: 0.5 0.25 0.1)"
-    )
-    parser.add_argument(
-        "--problem", nargs="+", type=int, default=None,
-        metavar="IDX", help="Problem indices to run (default: all)"
-    )
-    parser.add_argument(
-        "--list", action="store_true",
-        help="List available problems and exit"
-    )
-    return parser.parse_args()
+    return buf.getvalue()
 
 
+# ── "Add Problem" dialog ────────────────────────────────────────────────
+class AddProblemDialog(tk.Toplevel):
+    """Modal dialog for defining a new IVP problem at runtime."""
+
+    def __init__(self, parent: tk.Tk, on_added: callable, csv_path: str):
+        super().__init__(parent)
+        self.on_added = on_added
+        self.csv_path = csv_path
+        self.title("Add New Problem")
+        self.resizable(False, False)
+        self.grab_set()
+
+        pad = dict(padx=8, pady=4, sticky="w")
+
+        row = 0
+        ttk.Label(self, text="Name:").grid(row=row, column=0, **pad)
+        self.name_var = tk.StringVar()
+        ttk.Entry(self, textvariable=self.name_var, width=40).grid(row=row, column=1, **pad)
+
+        row += 1
+        ttk.Label(self, text="Description:").grid(row=row, column=0, **pad)
+        self.desc_var = tk.StringVar()
+        ttk.Entry(self, textvariable=self.desc_var, width=40).grid(row=row, column=1, **pad)
+
+        row += 1
+        ttk.Label(self, text="f(x, y) =").grid(row=row, column=0, **pad)
+        self.f_var = tk.StringVar()
+        ttk.Entry(self, textvariable=self.f_var, width=40).grid(row=row, column=1, **pad)
+        ttk.Label(self, text="e.g.  x - y   or   (2*x - y)**2", font=("Arial", 8)).grid(
+            row=row + 1, column=1, padx=8, sticky="w"
+        )
+
+        row += 2
+        ttk.Label(self, text="x0:").grid(row=row, column=0, **pad)
+        self.x0_var = tk.StringVar(value="0")
+        ttk.Entry(self, textvariable=self.x0_var, width=15).grid(row=row, column=1, **pad)
+
+        row += 1
+        ttk.Label(self, text="y0:").grid(row=row, column=0, **pad)
+        self.y0_var = tk.StringVar(value="0")
+        ttk.Entry(self, textvariable=self.y0_var, width=15).grid(row=row, column=1, **pad)
+
+        row += 1
+        ttk.Label(self, text="x_end:").grid(row=row, column=0, **pad)
+        self.x_end_var = tk.StringVar(value="1")
+        ttk.Entry(self, textvariable=self.x_end_var, width=15).grid(row=row, column=1, **pad)
+
+        row += 1
+        ttk.Label(self, text="Exact solution (optional):").grid(row=row, column=0, **pad)
+        self.exact_var = tk.StringVar()
+        ttk.Entry(self, textvariable=self.exact_var, width=40).grid(row=row, column=1, **pad)
+        ttk.Label(
+            self,
+            text="e.g.  x - 1 + 2*math.exp(-x)   (leave blank if unknown)",
+            font=("Arial", 8),
+        ).grid(row=row + 1, column=1, padx=8, sticky="w")
+
+        row += 2
+        btn_frame = ttk.Frame(self)
+        btn_frame.grid(row=row, column=0, columnspan=2, pady=10)
+        ttk.Button(btn_frame, text="Add", command=self._on_add).pack(side="left", padx=6)
+        ttk.Button(btn_frame, text="Cancel", command=self.destroy).pack(side="left", padx=6)
+
+    # ------------------------------------------------------------------ #
+    def _on_add(self):
+        name = self.name_var.get().strip()
+        desc = self.desc_var.get().strip()
+        f_expr = self.f_var.get().strip()
+
+        if not name or not f_expr:
+            messagebox.showwarning("Missing fields", "Name and f(x, y) are required.", parent=self)
+            return
+
+        # Parse f(x, y)
+        try:
+            f_func = eval(f"lambda x, y: {f_expr}", {"__builtins__": {}, "math": math})
+            # Quick smoke-test
+            f_func(0.0, 0.0)
+        except Exception as exc:
+            messagebox.showerror("Invalid f(x, y)", f"Could not parse f(x, y):\n{exc}", parent=self)
+            return
+
+        # Parse numbers
+        try:
+            x0 = float(self.x0_var.get())
+            y0 = float(self.y0_var.get())
+            x_end = float(self.x_end_var.get())
+        except ValueError:
+            messagebox.showerror("Invalid number", "x0, y0 and x_end must be numbers.", parent=self)
+            return
+
+        if x_end <= x0:
+            messagebox.showerror("Invalid range", "x_end must be greater than x0.", parent=self)
+            return
+
+        # Parse exact solution (optional)
+        exact_func = None
+        exact_expr = self.exact_var.get().strip()
+        if exact_expr:
+            try:
+                exact_func = eval(f"lambda x: {exact_expr}", {"__builtins__": {}, "math": math})
+                exact_func(x0)
+            except Exception as exc:
+                messagebox.showerror(
+                    "Invalid exact solution",
+                    f"Could not parse exact(x):\n{exc}",
+                    parent=self,
+                )
+                return
+
+        problem = IVP(
+            name=name,
+            description=desc or name,
+            f=f_func,
+            x0=x0,
+            y0=y0,
+            x_end=x_end,
+            exact=exact_func,
+        )
+        # Persist to CSV so it survives restarts
+        add_IVP_problem_to_csv(
+            self.csv_path, problem,
+            f_expr=f_expr, exact_expr=exact_expr,
+        )
+        self.on_added(problem)
+        self.destroy()
+
+
+# ── Main application window ─────────────────────────────────────────────
+class App(tk.Tk):
+    def __init__(self):
+        super().__init__()
+        self.title("IVP Solver Comparison")
+        self.geometry("920x680")
+        self.minsize(720, 500)
+
+        self._check_vars: list[tk.BooleanVar] = []
+        self._build_ui()
+        self._refresh_problem_list()
+
+    # ------------------------------------------------------------------ #
+    def _build_ui(self):
+        # ── Top frame: problem list + controls ──────────────────────────
+        top = ttk.Frame(self)
+        top.pack(fill="x", padx=10, pady=(10, 0))
+
+        ttk.Label(top, text="Select problems to solve:", font=("Arial", 11, "bold")).pack(anchor="w")
+
+        # Scrollable problem list
+        list_frame = ttk.Frame(top)
+        list_frame.pack(fill="x", pady=5)
+
+        canvas = tk.Canvas(list_frame, height=180, borderwidth=1, relief="sunken")
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        self._inner_frame = ttk.Frame(canvas)
+
+        self._inner_frame.bind(
+            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.create_window((0, 0), window=self._inner_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        self._canvas = canvas
+
+        # ── Buttons row ─────────────────────────────────────────────────
+        btn_frame = ttk.Frame(top)
+        btn_frame.pack(fill="x", pady=5)
+
+        ttk.Button(btn_frame, text="Select All", command=self._select_all).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Deselect All", command=self._deselect_all).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Add Problem…", command=self._open_add_dialog).pack(side="left", padx=4)
+        ttk.Button(btn_frame, text="Remove Selected", command=self._remove_selected).pack(side="left", padx=4)
+
+        # ── Step sizes ──────────────────────────────────────────────────
+        step_frame = ttk.Frame(top)
+        step_frame.pack(fill="x", pady=5)
+        ttk.Label(step_frame, text="Step sizes (comma-separated):").pack(side="left")
+        self.step_var = tk.StringVar(value=", ".join(str(s) for s in DEFAULT_STEP_SIZES))
+        ttk.Entry(step_frame, textvariable=self.step_var, width=30).pack(side="left", padx=6)
+
+        # ── Run button ──────────────────────────────────────────────────
+        ttk.Button(top, text="Run Benchmark", command=self._run_benchmark, style="Accent.TButton").pack(
+            anchor="e", pady=5
+        )
+
+        # ── Results area ────────────────────────────────────────────────
+        result_label = ttk.Label(self, text="Results:", font=("Arial", 11, "bold"))
+        result_label.pack(anchor="w", padx=10, pady=(8, 0))
+
+        self.result_text = scrolledtext.ScrolledText(
+            self, wrap="none", font=("Consolas", 10), state="disabled"
+        )
+        self.result_text.pack(fill="both", expand=True, padx=10, pady=(0, 10))
+
+        # Horizontal scrollbar for results
+        h_scroll = ttk.Scrollbar(self.result_text, orient="horizontal", command=self.result_text.xview)
+        self.result_text.configure(xscrollcommand=h_scroll.set)
+        h_scroll.pack(side="bottom", fill="x")
+
+    # ── Problem-list helpers ────────────────────────────────────────────
+    def _refresh_problem_list(self):
+        for widget in self._inner_frame.winfo_children():
+            widget.destroy()
+        self._check_vars.clear()
+
+        for i, ivp in enumerate(problems_pool):
+            var = tk.BooleanVar(value=True)
+            self._check_vars.append(var)
+            exact_tag = " [exact]" if ivp.exact else ""
+            text = f"{ivp.name}, f(x, y) = {ivp.f_string}  —  x in [{ivp.x0}, {ivp.x_end}], y0={ivp.y0}{exact_tag}"
+            cb = ttk.Checkbutton(self._inner_frame, text=text, variable=var)
+            cb.grid(row=i, column=0, sticky="w", padx=4, pady=1)
+
+        self._canvas.yview_moveto(0)
+
+    def _select_all(self):
+        for v in self._check_vars:
+            v.set(True)
+
+    def _deselect_all(self):
+        for v in self._check_vars:
+            v.set(False)
+
+    def _open_add_dialog(self):
+        AddProblemDialog(self, on_added=self._problem_added, csv_path=CSV_PATH)
+
+    def _problem_added(self, ivp: IVP):
+        problems_pool.append(ivp)
+        self._refresh_problem_list()
+
+    def _remove_selected(self):
+        indices = [i for i, v in enumerate(self._check_vars) if v.get()]
+        if not indices:
+            messagebox.showinfo("Nothing selected", "Check the problems you want to remove.")
+            return
+        names = ", ".join(problems_pool[i].name for i in indices)
+        if not messagebox.askyesno("Confirm removal", f"Remove {len(indices)} problem(s)?\n{names}"):
+            return
+        for i in sorted(indices, reverse=True):
+            remove_IVP_problem_from_csv(CSV_PATH, problems_pool[i].name)
+            problems_pool.pop(i)
+        self._refresh_problem_list()
+
+    # ── Benchmark execution ─────────────────────────────────────────────
+    def _run_benchmark(self):
+        selected = [problems_pool[i] for i, v in enumerate(self._check_vars) if v.get()]
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Please select at least one problem.")
+            return
+
+        # Parse step sizes
+        try:
+            step_sizes = [float(s.strip()) for s in self.step_var.get().split(",") if s.strip()]
+            if not step_sizes or any(s <= 0 for s in step_sizes):
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Invalid step sizes", "Enter positive numbers separated by commas.")
+            return
+
+        self.config(cursor="wait")
+        self.update_idletasks()
+
+        try:
+            report = run_benchmark(selected, step_sizes)
+        except Exception as exc:
+            report = f"Error during benchmark:\n{exc}"
+        finally:
+            self.config(cursor="")
+
+        self.result_text.configure(state="normal")
+        self.result_text.delete("1.0", "end")
+        self.result_text.insert("end", report)
+        self.result_text.configure(state="disabled")
+        self.result_text.yview_moveto(0)
+
+
+# ── Entry point ─────────────────────────────────────────────────────────
 def main() -> None:
-    args = _parse_args()
+    app = App()
+    app.mainloop()
 
-    if args.list:
-        print("\nAvailable problems:")
-        print(format_table(
-            ["Index", "Name", "x_end", "Has exact?"],
-            [
-                [i, ivp.name, ivp.x_end, "Yes" if ivp.exact else "No"]
-                for i, ivp in enumerate(ALL_PROBLEMS)
-            ],
-            col_widths=[5, 35, 6, 10],
-        ))
-        return
-
-    print("Solver Comparison")
-    print("Implemented methods: " + ", ".join(s.name for s in ALL_SOLVERS))
-    print("SciPy references:    " + ", ".join(s.name for s in ALL_SCIPY_SOLVERS))
-
-    run_benchmark(
-        problems_indices=args.problem,
-        step_sizes=args.step,
-        verbose=True,
-    )
 
 if __name__ == "__main__":
     main()

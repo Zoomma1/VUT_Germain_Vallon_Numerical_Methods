@@ -1,3 +1,3 @@
-from .ivp_collection import ALL_PROBLEMS
+from .ivp_collection import IVP
 
-__all__ = ["ALL_PROBLEMS"]
+__all__ = ["IVP"]
