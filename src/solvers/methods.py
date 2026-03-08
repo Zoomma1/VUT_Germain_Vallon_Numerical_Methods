@@ -46,10 +46,10 @@ class EulerModular(Solver):
         return _euler_step(f, x, y, h)
 
 
-class RangeKutta(Solver):
+class RungeKutta(Solver):
     @property
     def name(self) -> str:
-        return "RangeKutta (classical)"
+        return "RungeKutta (classical)"
 
     def _step(self, f: RHSFunc, x: float, y: float, h: float) -> float:
         k1 = f(x,           y)
@@ -62,5 +62,5 @@ class RangeKutta(Solver):
 ALL_SOLVERS: list[Solver] = [
     EulerDumb(),
     EulerModular(),
-    RangeKutta(),
+    RungeKutta(),
 ]
