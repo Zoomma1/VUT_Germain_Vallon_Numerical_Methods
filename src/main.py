@@ -113,6 +113,8 @@ class AddProblemDialog(tk.Toplevel):
 
         pad = dict(padx=8, pady=4, sticky="w")
 
+        help_label_text = "Use * for multiplication.\nUse ** for powers.\nUse math functions like math.exp, math.sin, etc.\nRefer to python's math module for available functions."
+
         row = 0
         ttk.Label(self, text="Name:").grid(row=row, column=0, **pad)
         self.name_var = tk.StringVar()
@@ -127,12 +129,9 @@ class AddProblemDialog(tk.Toplevel):
         ttk.Label(self, text="f(x, y) =").grid(row=row, column=0, **pad)
         self.f_var = tk.StringVar()
         ttk.Entry(self, textvariable=self.f_var, width=40).grid(row=row, column=1, **pad)
-        tool_tip = tk.Label(self, text="?", font=("Arial", 12))
-        tool_tip.grid(row=row, column=2, padx=4, pady=2, sticky="w")
-        ToolTip(tool_tip, "Python expression for f(x, y)")
-        ttk.Label(self, text="e.g.  x - y   or   (2*x - y)**2", font=("Arial", 8)).grid(
-            row=row + 1, column=1, padx=6, sticky="w"
-        )
+        help_label = ttk.Label(self, text="?")
+        help_label.grid(row=row, column=2, **pad)
+        ToolTip(help_label, msg=help_label_text)
 
         row += 2
         ttk.Label(self, text="x0:").grid(row=row, column=0, **pad)
@@ -158,6 +157,9 @@ class AddProblemDialog(tk.Toplevel):
             text="e.g.  x - 1 + 2*math.exp(-x)   (leave blank if unknown)",
             font=("Arial", 8),
         ).grid(row=row + 1, column=1, padx=8, sticky="w")
+        help_label = ttk.Label(self, text="?")
+        help_label.grid(row=row, column=2, **pad)
+        ToolTip(help_label, msg=help_label_text)
 
         row += 2
         btn_frame = ttk.Frame(self)

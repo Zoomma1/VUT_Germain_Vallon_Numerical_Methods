@@ -1,2 +1,3 @@
 name,description,f_expr,x0,y0,x_end,exact_expr
 Ex 1.7.4 – t−x,"dx/dt = t - x,  x(0) = 1. Exact: x = t - 1 + 2*e^(-t).",x - y,0.0,1.0,1.0,x - 1 + 2 * math.exp(-x)
+Ex 1.7.3,Ex 1.7.3,(2*y-x)**2,0.0,2.0,1.0,
