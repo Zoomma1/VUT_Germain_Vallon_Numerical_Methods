@@ -289,8 +289,13 @@ class App(tk.Tk):
         )
 
         #  Results area (tabbed: Text + Plots) 
-        result_label = ttk.Label(self, text="Results:", font=("Arial", 11, "bold"))
-        result_label.pack(anchor="w", padx=10, pady=(8, 0))
+        result_row = ttk.Frame(self)
+        result_row.pack(fill="x", padx=10, pady=(8, 0))
+        result_label = ttk.Label(result_row, text="Results:", font=("Arial", 11, "bold"))
+        result_label.pack(side="left", padx=10, pady=(8, 0))
+        help_label = ttk.Label(result_row, text="?")
+        help_label.pack(side="right", padx=4)
+        ToolTip(help_label, msg="Some results might be missing if a solver fails to solve the problem.\nSome graph results might be hidden due to values overlaping")
 
         self._notebook = ttk.Notebook(self)
         self._notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
@@ -339,6 +344,35 @@ class App(tk.Tk):
 
         self._plot_figures: list = []
         self._plot_widgets: list = []
+
+        # Text and plot tab combined (scrollable)
+        text_and_plot_tab = ttk.Frame(self._notebook)
+        self._notebook.add(text_and_plot_tab, text="Text + Plots")
+
+        plot_canvas_combined = tk.Canvas(text_and_plot_tab)
+        plot_scrollbar_combined = ttk.Scrollbar(text_and_plot_tab, orient="vertical", command=plot_canvas_combined.yview)
+        self._combined_inner = ttk.Frame(plot_canvas_combined)
+
+        self._combined_inner.bind(
+            "<Configure>",
+            lambda e: plot_canvas_combined.configure(scrollregion=plot_canvas_combined.bbox("all")),
+        )
+        self._combined_window = plot_canvas_combined.create_window((0, 0), window=self._combined_inner, anchor="nw")
+
+        # Make the inner frame stretch to the canvas width
+        def _on_combined_canvas_resize(event):
+            plot_canvas_combined.itemconfig(self._combined_window, width=event.width)
+        plot_canvas_combined.bind("<Configure>", _on_combined_canvas_resize)
+        plot_canvas_combined.configure(yscrollcommand=plot_scrollbar_combined.set)
+        plot_scrollbar_combined.pack(side="right", fill="y")
+        plot_canvas_combined.pack(side="left", fill="both", expand=True)
+        self._plot_canvas_tk = plot_canvas_combined
+
+        # Enable mouse-wheel scrolling
+        def _on_combined_mousewheel(event):
+            plot_canvas_combined.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        plot_canvas_combined.bind_all("<MouseWheel>", _on_combined_mousewheel)
+
 
     #  Problem-list helpers 
     def _refresh_problem_list(self):
@@ -417,8 +451,9 @@ class App(tk.Tk):
         self.result_text.configure(state="disabled")
         self.result_text.yview_moveto(0)
 
+        self._draw_text_and_plots(report, plot_data)
         self._draw_plots(plot_data)
-        self._notebook.select(1)
+        self._notebook.select(2)
 
     def _draw_plots(self, plot_data: list[dict]):
         import matplotlib.pyplot as plt
@@ -462,6 +497,58 @@ class App(tk.Tk):
             self._plot_widgets.append(widget)
 
         self._plot_canvas_tk.yview_moveto(0)
+
+    def _draw_text_and_plots(self, report: str, plot_data: list[dict]):
+        import matplotlib.pyplot as plt
+        import numpy as np
+
+        for widget in self._combined_inner.winfo_children():
+            widget.destroy()
+
+        if not plot_data:
+            return
+
+        step_texts = []
+        lines = report.splitlines()
+        current = []
+        for line in lines:
+            if line.strip().startswith("Step size h ="):
+                if current:
+                    step_texts.append("\n".join(current))
+                    current = []
+            current.append(line)
+        if current:
+            step_texts.append("\n".join(current))
+
+        for i, entry in enumerate(plot_data):
+            if i < len(step_texts):
+                text_widget = scrolledtext.ScrolledText(self._combined_inner, height=8, font=("Consolas", 10), state="normal")
+                text_widget.insert("end", step_texts[i])
+                text_widget.configure(state="disabled")
+                text_widget.pack(fill="x", padx=4, pady=(8, 2))
+
+            fig = Figure(figsize=(9, 4), dpi=100, tight_layout=True)
+            ax = fig.add_subplot(111)
+            ax.set_title(entry["title"], fontsize=10)
+            ax.set_xlabel("x")
+            ax.set_ylabel("y")
+
+            for name, xs, ys in entry["curves"]:
+                ax.plot(xs, ys, marker=".", markersize=3, linewidth=1, label=name)
+
+            exact_fn = entry.get("exact_fn")
+            if exact_fn is not None:
+                x_fine = np.linspace(entry["x0"], entry["x_end"], 200)
+                y_fine = [exact_fn(xi) for xi in x_fine]
+                ax.plot(x_fine, y_fine, "k--", linewidth=1.5, label="Exact")
+
+            ax.legend(fontsize=7, loc="best")
+            ax.grid(True, linewidth=0.3)
+
+            canvas_agg = FigureCanvasTkAgg(fig, master=self._combined_inner)
+            canvas_agg.draw()
+            widget = canvas_agg.get_tk_widget()
+            widget.pack(fill="x", pady=(0, 8))
 
 
 #  Entry point 
