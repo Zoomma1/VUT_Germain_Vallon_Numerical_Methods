@@ -1,5 +1,7 @@
+
 from .utils import absolute_error, relative_error_percent, format_table, format_float
 from .csv_utils import retrieve_all_IVP_problems_from_csv, add_IVP_problem_to_csv, remove_IVP_problem_from_csv
+from .SafeToolTip import SafeToolTip
 
 __all__ = [
     "absolute_error",
@@ -9,4 +11,5 @@ __all__ = [
     "retrieve_all_IVP_problems_from_csv",
     "add_IVP_problem_to_csv",
     "remove_IVP_problem_from_csv",
+    "SafeToolTip",
 ]

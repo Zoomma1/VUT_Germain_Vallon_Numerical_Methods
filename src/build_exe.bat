@@ -1,3 +1,4 @@
+@REM This script builds the executable for the VUT IVP Solver Comparison project using PyInstaller.
 @echo off
 REM Enable virtual environment
 call .venv\Scripts\activate

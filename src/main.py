@@ -26,6 +26,7 @@ from utils import (
     retrieve_all_IVP_problems_from_csv,
     add_IVP_problem_to_csv,
     remove_IVP_problem_from_csv,
+    SafeToolTip,
 )
 
 
@@ -33,7 +34,6 @@ DEFAULT_STEP_SIZES = [0.5, 0.25, 0.1]
 CSV_PATH = os.path.join(os.path.dirname(__file__), "IVP_problems.csv")
 
 problems_pool: list[IVP] = retrieve_all_IVP_problems_from_csv(CSV_PATH)
-
 
 #  Benchmark logic (returns plain-text report + plot data) 
 def run_benchmark(
@@ -131,7 +131,7 @@ class AddProblemDialog(tk.Toplevel):
         ttk.Entry(self, textvariable=self.f_var, width=40).grid(row=row, column=1, **pad)
         help_label = ttk.Label(self, text="?")
         help_label.grid(row=row, column=2, **pad)
-        ToolTip(help_label, msg=help_label_text)
+        SafeToolTip(help_label, text=help_label_text)
 
         row += 2
         ttk.Label(self, text="x0:").grid(row=row, column=0, **pad)
@@ -159,7 +159,7 @@ class AddProblemDialog(tk.Toplevel):
         ).grid(row=row + 1, column=1, padx=8, sticky="w")
         help_label = ttk.Label(self, text="?")
         help_label.grid(row=row, column=2, **pad)
-        ToolTip(help_label, msg=help_label_text)
+        SafeToolTip(help_label, text=help_label_text)
 
         row += 2
         btn_frame = ttk.Frame(self)
@@ -295,7 +295,7 @@ class App(tk.Tk):
         result_label.pack(side="left", padx=10, pady=(8, 0))
         help_label = ttk.Label(result_row, text="?")
         help_label.pack(side="right", padx=4)
-        ToolTip(help_label, msg="Some results might be missing if a solver fails to solve the problem.\nSome graph results might be hidden due to values overlaping")
+        SafeToolTip(help_label, text="Some results might be missing if a solver fails to solve the problem.\nSome graph results might be hidden due to values overlaping")
 
         self._notebook = ttk.Notebook(self)
         self._notebook.pack(fill="both", expand=True, padx=10, pady=(0, 10))
